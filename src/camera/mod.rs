@@ -26,6 +26,8 @@ pub enum CameraError {
     V4L2Error(drivers::v4l2::V4L2Error),
     #[cfg(feature = "camera_flycap2")]
     FlyCapture2Error(drivers::flycapture2::FlyCapture2Error),
+    #[cfg(feature = "camera_spinnaker")]
+    SpinnakerError(drivers::spinnaker::SpinnakerError),
 }
 
 #[derive(Clone, Copy)]
@@ -101,6 +103,10 @@ pub trait Driver {
     fn enumerate_cameras(&mut self) -> Result<Vec<CameraInfo>, CameraError>;
 
     /// Returns camera with capture enabled.
+    ///
+    /// # Parameters
+    ///
+    /// * `id` - One of IDs returned by the most recent call to `enumerate_cameras`.
     fn open_camera(&mut self, id: CameraId) -> Result<Box<dyn Camera>, CameraError>;
 }
 
