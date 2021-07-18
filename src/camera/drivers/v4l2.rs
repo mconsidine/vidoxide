@@ -245,6 +245,14 @@ impl Camera for V4L2Camera {
     fn unset_roi(&mut self) -> Result<(), CameraError> {
         panic!("Not implemented yet.");
     }
+
+    fn set_boolean_control(&mut self, _id: CameraControlId, _state: bool) -> Result<Vec<Notification>, CameraError> {
+        unimplemented!()
+    }
+
+    fn get_boolean_control(&self, _id: CameraControlId) -> Result<bool, CameraError> {
+        unimplemented!()
+    }
 }
 
 pub struct V4L2FrameCapturer {

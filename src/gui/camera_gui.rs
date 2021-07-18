@@ -36,6 +36,11 @@ pub struct NumberControlWidgets {
     pub slider_changed_signal: glib::SignalHandlerId
 }
 
+pub struct BooleanControlWidgets {
+    pub state_checkbox: gtk::CheckButton,
+    pub checkbox_changed_signal: glib::SignalHandlerId
+}
+
 pub struct CommonControlWidgets {
     pub name: String,
     pub h_box: gtk::Box,
@@ -47,7 +52,8 @@ pub struct CommonControlWidgets {
 #[enum_dispatch]
 pub enum ControlWidgetBundle {
     ListControl(ListControlWidgets),
-    NumberControl(NumberControlWidgets)
+    NumberControl(NumberControlWidgets),
+    BooleanControl(BooleanControlWidgets)
 }
 
 #[enum_dispatch(ControlWidgetBundle)]
@@ -64,6 +70,12 @@ impl Editability for ListControlWidgets {
 impl Editability for NumberControlWidgets {
     fn set_editable(&self, state: bool) {
         self.slider.set_sensitive(state);
+    }
+}
+
+impl Editability for BooleanControlWidgets {
+    fn set_editable(&self, state: bool) {
+        self.state_checkbox.set_sensitive(state);
     }
 }
 
@@ -263,6 +275,7 @@ pub fn on_camera_notification(
                                         );
                                     }
                                 },
+
                                 ControlWidgetBundle::NumberControl(number_widgets) => {
                                     if let camera::CameraControl::Number(number_control) = control {
                                         let slider = &number_widgets.slider;
@@ -276,6 +289,15 @@ pub fn on_camera_notification(
                                             0.0
                                         ));
                                         slider.unblock_signal(&number_widgets.slider_changed_signal);
+                                    }
+                                },
+
+                                ControlWidgetBundle::BooleanControl(boolean_widgets) => {
+                                    if let camera::CameraControl::Boolean(bool_ctrl) = control {
+                                        let checkbox = &boolean_widgets.state_checkbox;
+                                        checkbox.block_signal(&boolean_widgets.checkbox_changed_signal);
+                                        checkbox.set_active(bool_ctrl.state());
+                                        checkbox.unblock_signal(&boolean_widgets.checkbox_changed_signal);
                                     }
                                 }
                             }
@@ -364,6 +386,7 @@ fn create_control_widgets(
                 &h_box,
                 program_data_rc
             );
+
             control_widgets.insert(
                 list_ctrl.base().id,
                 (CommonControlWidgets{
@@ -375,12 +398,14 @@ fn create_control_widgets(
                 }, widget_bundle)
             );
         },
+
         CameraControl::Number(number_ctrl) => {
             let widget_bundle = create_number_control_widgets(
                 &number_ctrl,
                 &h_box,
                 program_data_rc
             );
+
             control_widgets.insert(
                 number_ctrl.base().id,
                 (CommonControlWidgets{
@@ -389,6 +414,25 @@ fn create_control_widgets(
                     auto: cb_auto.clone(),
                     on_off: cb_on_off.clone(),
                     access_mode: number_ctrl.base().access_mode
+                }, widget_bundle)
+            );
+        },
+
+        CameraControl::Boolean(bool_ctrl) => {
+            let widget_bundle = create_bool_control_widgets(
+                &bool_ctrl,
+                &h_box,
+                program_data_rc
+            );
+
+            control_widgets.insert(
+                bool_ctrl.base().id,
+                (CommonControlWidgets{
+                    name: bool_ctrl.base().label.clone(),
+                    h_box: h_box.clone(),
+                    auto: cb_auto.clone(),
+                    on_off: cb_on_off.clone(),
+                    access_mode: bool_ctrl.base().access_mode
                 }, widget_bundle)
             );
         }
@@ -421,6 +465,29 @@ fn create_list_control_widgets(
     ControlWidgetBundle::ListControl(ListControlWidgets{
         combo: items_combo,
         combo_changed_signal
+    })
+}
+
+fn create_bool_control_widgets(
+    bool_ctrl: &camera::BooleanControl,
+    h_box: &gtk::Box,
+    program_data_rc: &Rc<RefCell<ProgramData>>
+) -> ControlWidgetBundle {
+    let state_checkbox = gtk::CheckButtonBuilder::new().label("").active(bool_ctrl.state()).build();
+    let ctrl_id = bool_ctrl.base().id;
+    let requires_capture_pause = bool_ctrl.base().requires_capture_pause;
+
+    let checkbox_changed_signal = state_checkbox.connect_toggled(
+        clone!(@weak program_data_rc => @default-panic, move |state_checkbox| {
+            on_camera_boolean_control_change(&state_checkbox, &program_data_rc, ctrl_id, requires_capture_pause);
+        }
+    ));
+
+    h_box.pack_start(&state_checkbox, true, true, PADDING);
+
+    ControlWidgetBundle::BooleanControl(BooleanControlWidgets{
+        state_checkbox,
+        checkbox_changed_signal
     })
 }
 
@@ -544,6 +611,26 @@ fn on_camera_number_control_change(
         let notifications = program_data_rc.borrow_mut().camera.as_mut().unwrap().set_number_control(
             ctrl_id,
             slider.get_value()
+        ).unwrap();
+        on_camera_notification(
+            notifications,
+            &program_data_rc
+        );
+    }
+}
+
+fn on_camera_boolean_control_change(
+    state_checkbox: &gtk::CheckButton,
+    program_data_rc: &Rc<RefCell<ProgramData>>,
+    ctrl_id: CameraControlId,
+    requires_capture_pause: bool
+) {
+    if requires_capture_pause {
+        panic!("Not implemented yet.");
+    } else {
+        let notifications = program_data_rc.borrow_mut().camera.as_mut().unwrap().set_boolean_control(
+            ctrl_id,
+            state_checkbox.get_active()
         ).unwrap();
         on_camera_notification(
             notifications,

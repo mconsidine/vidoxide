@@ -67,6 +67,8 @@ pub trait Camera {
 
     fn set_list_control(&mut self, id: CameraControlId, option_idx: usize) -> Result<Vec<Notification>, CameraError>;
 
+    fn set_boolean_control(&mut self, id: CameraControlId, state: bool) -> Result<Vec<Notification>, CameraError>;
+
     fn set_auto(&self, id: CameraControlId, state: bool) -> Result<Vec<Notification>, CameraError>;
 
     fn set_on_off(&self, id: CameraControlId, state: bool) -> Result<Vec<Notification>, CameraError>;
@@ -74,6 +76,8 @@ pub trait Camera {
     fn get_number_control(&self, id: CameraControlId) -> Result<f64, CameraError>;
 
     fn get_list_control(&self, id: CameraControlId) -> Result<usize, CameraError>;
+
+    fn get_boolean_control(&self, id: CameraControlId) -> Result<bool, CameraError>;
 
     /// Returns temperature in degrees Celsius.
     fn temperature(&self) -> Option<f64>;
@@ -114,7 +118,8 @@ pub trait Driver {
 #[derive(Debug)]
 pub enum CameraControl {
     Number(NumberControl),
-    List(ListControl)
+    List(ListControl),
+    Boolean(BooleanControl)
 }
 
 #[enum_dispatch(CameraControl)]
@@ -181,11 +186,25 @@ pub struct ListControl {
 }
 
 impl ListControl {
-    pub fn base(&self) -> &CameraControlBase { &self.base }
     pub fn items(&self) -> &Vec<String> { &self.items }
     pub fn current_idx(&self) -> usize { self.current_idx }
 }
 
 impl BaseProperties for ListControl {
+    fn base(&self) -> &CameraControlBase { &self.base }
+}
+
+#[derive(Debug)]
+pub struct BooleanControl {
+    base: CameraControlBase,
+    state: bool
+}
+
+impl BooleanControl {
+    pub fn base(&self) -> &CameraControlBase { &self.base }
+    pub fn state(&self) -> bool { self.state }
+}
+
+impl BaseProperties for BooleanControl {
     fn base(&self) -> &CameraControlBase { &self.base }
 }

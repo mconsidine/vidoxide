@@ -19,7 +19,13 @@ mod mount_gui;
 mod rec_gui;
 
 use cairo;
-use camera_gui::{CommonControlWidgets, ControlWidgetBundle, ListControlWidgets, NumberControlWidgets};
+use camera_gui::{
+    CommonControlWidgets,
+    ControlWidgetBundle,
+    ListControlWidgets,
+    NumberControlWidgets,
+    BooleanControlWidgets
+};
 use crate::{CameraControlChange, OnCapturePauseAction, ProgramData};
 use crate::camera;
 use crate::camera::CameraError;
@@ -685,13 +691,14 @@ fn update_readable_camera_controls(program_data_rc: &Rc<RefCell<ProgramData>>) {
     let program_data = program_data_rc.borrow();
 
     for c_widget in &program_data.gui.as_ref().unwrap().control_widgets {
-        let is_in_auto_mode = match &(c_widget.1).0.auto {
-            Some(cbox) => cbox.get_active(),
-            _ => false
+        let is_auto: Option<bool> = match &(c_widget.1).0.auto {
+            Some(cbox) => Some(cbox.get_active()),
+            _ => None
         };
         let access_mode = (c_widget.1).0.access_mode;
-        if access_mode == camera::ControlAccessMode::ReadOnly ||
-            is_in_auto_mode && access_mode != camera::ControlAccessMode::WriteOnly {
+        if access_mode == camera::ControlAccessMode::ReadOnly
+            || is_auto.is_some() && is_auto.unwrap() && access_mode != camera::ControlAccessMode::WriteOnly
+            || access_mode != camera::ControlAccessMode::WriteOnly {
 
             match &(c_widget.1).1 {
                 ControlWidgetBundle::ListControl(ListControlWidgets{ combo, combo_changed_signal }) => {
@@ -701,12 +708,21 @@ fn update_readable_camera_controls(program_data_rc: &Rc<RefCell<ProgramData>>) {
                     );
                     combo.unblock_signal(&combo_changed_signal);
                 },
+
                 ControlWidgetBundle::NumberControl(NumberControlWidgets{ slider, slider_changed_signal }) => {
                     slider.block_signal(&slider_changed_signal);
                     slider.set_value(
                         program_data.camera.as_ref().unwrap().get_number_control(*c_widget.0).unwrap()
                     );
                     slider.unblock_signal(&slider_changed_signal);
+                },
+
+                ControlWidgetBundle::BooleanControl(BooleanControlWidgets{ state_checkbox, checkbox_changed_signal }) => {
+                    state_checkbox.block_signal(&checkbox_changed_signal);
+                    state_checkbox.set_active(
+                        program_data.camera.as_ref().unwrap().get_boolean_control(*c_widget.0).unwrap()
+                    );
+                    state_checkbox.unblock_signal(&checkbox_changed_signal);
                 }
             }
         }

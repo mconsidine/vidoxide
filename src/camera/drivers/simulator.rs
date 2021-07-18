@@ -237,6 +237,14 @@ impl Camera for SimCamera {
         println!("Simulator: ROI not implemented yet.");
         Ok(())
     }
+
+    fn set_boolean_control(&mut self, _id: CameraControlId, _state: bool) -> Result<Vec<Notification>, CameraError> {
+        unimplemented!()
+    }
+
+    fn get_boolean_control(&self, _id: CameraControlId) -> Result<bool, CameraError> {
+        unimplemented!()
+    }
 }
 
 pub struct SimFrameCapturer {

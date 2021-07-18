@@ -839,6 +839,14 @@ impl Camera for IIDCCamera {
 
         Ok(())
     }
+
+    fn set_boolean_control(&mut self, _id: CameraControlId, _state: bool) -> Result<Vec<Notification>, CameraError> {
+        unimplemented!()
+    }
+
+    fn get_boolean_control(&self, _id: CameraControlId) -> Result<bool, CameraError> {
+        unimplemented!()
+    }
 }
 
 impl FrameCapturer for IIDCFrameCapturer {

@@ -10,6 +10,12 @@
 //! Spinnaker camera driver.
 //!
 
+#![allow(
+    non_camel_case_types,
+    non_upper_case_globals,
+    non_snake_case
+)]
+
 use crate::camera::*;
 use ga_image;
 use ga_image::Image;
@@ -55,16 +61,28 @@ impl From<SpinnakerCameraId> for CameraId  {
 
 /// Common GenICam camera feature names (Standard Features Naming Convention 1.5.1).
 mod genicam {
-    pub const ROOT:               &'static str = "Root";
-    pub const DEVICE_VENDOR_NAME: &'static str = "DeviceVendorName";
-    pub const DEVICE_MODEL_NAME:  &'static str = "DeviceModelName";
+    pub const ROOT:                                           &'static str = "Root";
+    pub const DEVICE_VENDOR_NAME:                             &'static str = "DeviceVendorName";
+    pub const DEVICE_MODEL_NAME:                              &'static str = "DeviceModelName";
+    pub const DEVICE_TEMPERATURE:                             &'static str = "DeviceTemperature";
+    pub const EXPOSURE_TIME:                                  &'static str = "ExposureTime";
+    pub const EXPOSURE_AUTO:                                  &'static str = "ExposureAuto";
+    pub const GAIN:                                           &'static str = "Gain";
+    pub const GAIN_AUTO:                                      &'static str = "GainAuto";
+    pub const ACQUISITION_FRAME_RATE:                         &'static str = "AcquisitionFrameRate";
+}
+
+/// FLIR-specific camera feature names (glimpsed in CM3-U3-13S2M, BFS-U3-16S2M cameras).
+mod flir {
+    pub const ACQUISITION_FRAME_RATE_AUTO:                    &'static str = "AcquisitionFrameRateAuto";
+    pub const ACQUISITION_FRAME_RATE_ENABLED:                 &'static str = "AcquisitionFrameRateEnabled";
 }
 
 /// Wrappers of Spinnaker objects.
 mod spin {
     use std::cell::RefCell;
     use libspinnaker_sys::*;
-    use super::{CameraError, SpinnakerError};
+    use super::{CameraError, ControlAccessMode, SpinnakerError};
 
     /// Calls the string `getter` on `object`.
     pub fn read_string<Object>(
@@ -82,6 +100,17 @@ mod spin {
 
         let bytes: Vec<u8> = buf[..returned_buf_len as usize - 1].iter().map(|signed| *signed as u8).collect();
         Ok(String::from_utf8(bytes).unwrap())
+    }
+
+    /// Calls the value `getter` on `object`.
+    fn read_value<Value>(
+        object: *mut std::os::raw::c_void,
+        getter: unsafe extern "C" fn(*mut std::os::raw::c_void, *mut Value) -> spinError
+    ) -> Result<Value, CameraError> {
+        let mut value = std::mem::MaybeUninit::uninit();
+        checked_call!(getter(object, value.as_mut_ptr()));
+        let value = unsafe { value.assume_init() };
+        Ok(value)
     }
 
     pub struct System {
@@ -122,9 +151,7 @@ mod spin {
         }
 
         pub fn num_cameras(&self) -> Result<usize, CameraError> {
-            let mut result = std::mem::MaybeUninit::uninit();
-            checked_call!(spinCameraListGetSize(self.handle, result.as_mut_ptr()));
-            let result = unsafe { result.assume_init() };
+            let result = read_value::<size_t>(self.handle, spinCameraListGetSize)?;
             Ok(result as usize)
         }
 
@@ -153,52 +180,32 @@ mod spin {
 
     impl Image {
         pub fn status(&self) -> Result<spinImageStatus, CameraError> {
-            let mut result = std::mem::MaybeUninit::uninit();
-            checked_call!(spinImageGetStatus(self.handle, result.as_mut_ptr()));
-            let result = unsafe { result.assume_init() };
-            Ok(result)
+            read_value(self.handle, spinImageGetStatus)
         }
 
         pub fn pixel_format(&self) -> Result<spinPixelFormatEnums, CameraError> {
-            let mut result = std::mem::MaybeUninit::uninit();
-            checked_call!(spinImageGetPixelFormat(self.handle, result.as_mut_ptr()));
-            let result = unsafe { result.assume_init() };
-            Ok(result)
+            read_value(self.handle, spinImageGetPixelFormat)
         }
 
         pub fn width(&self) -> Result<size_t, CameraError> {
-            let mut result = std::mem::MaybeUninit::uninit();
-            checked_call!(spinImageGetWidth(self.handle, result.as_mut_ptr()));
-            let result = unsafe { result.assume_init() };
-            Ok(result)
+            read_value(self.handle, spinImageGetWidth)
         }
 
         pub fn height(&self) -> Result<size_t, CameraError> {
-            let mut result = std::mem::MaybeUninit::uninit();
-            checked_call!(spinImageGetHeight(self.handle, result.as_mut_ptr()));
-            let result = unsafe { result.assume_init() };
-            Ok(result)
+            read_value(self.handle, spinImageGetHeight)
         }
 
         pub fn stride(&self) -> Result<size_t, CameraError> {
-            let mut result = std::mem::MaybeUninit::uninit();
-            checked_call!(spinImageGetStride(self.handle, result.as_mut_ptr()));
-            let result = unsafe { result.assume_init() };
-            Ok(result)
+            read_value(self.handle, spinImageGetStride)
         }
 
         pub fn data_ptr(&self) -> Result<*const ::std::os::raw::c_void, CameraError> {
-            let mut result = std::mem::MaybeUninit::uninit();
-            checked_call!(spinImageGetData(self.handle, result.as_mut_ptr()));
-            let result = unsafe { result.assume_init() };
-            Ok(result)
+            let value = read_value(self.handle, spinImageGetData)?;
+            Ok(value)
         }
 
         pub fn data_size(&self) -> Result<size_t, CameraError> {
-            let mut result = std::mem::MaybeUninit::uninit();
-            checked_call!(spinImageGetBufferSize(self.handle, result.as_mut_ptr()));
-            let result = unsafe { result.assume_init() };
-            Ok(result)
+            read_value(self.handle, spinImageGetBufferSize)
         }
     }
 
@@ -321,6 +328,25 @@ mod spin {
             read_string(self.handle, spinStringGetValue)
         }
 
+        pub fn float_value(&self) -> Result<f64, CameraError> {
+            read_value(self.handle, spinFloatGetValue)
+        }
+
+        pub fn set_float_value(&self, value: f64) -> Result<(), CameraError> {
+            checked_call!(spinFloatSetValue(self.handle, value));
+            Ok(())
+        }
+
+        pub fn bool_value(&self) -> Result<bool, CameraError> {
+            let result = read_value(self.handle, spinBooleanGetValue)?;
+            Ok(result == True)
+        }
+
+        pub fn set_bool_value(&self, value: bool) -> Result<(), CameraError> {
+            checked_call!(spinBooleanSetValue(self.handle, if value { True } else { False }));
+            Ok(())
+        }
+
         pub fn as_string(&self) -> Result<String, CameraError> {
             let mut readable: bool8_t = False;
             checked_call!(spinNodeIsReadable(self.handle, &mut readable));
@@ -333,6 +359,29 @@ mod spin {
 
         pub fn name(&self) -> &str {
             &self.name
+        }
+
+        pub fn visibility(&self) -> Result<spinVisibility, CameraError> {
+            read_value(self.handle, spinNodeGetVisibility)
+        }
+
+        pub fn readable(&self) -> Result<bool, CameraError> {
+            let result = read_value(self.handle, spinNodeIsReadable)?;
+            Ok(result == True)
+        }
+
+        pub fn writable(&self) -> Result<bool, CameraError> {
+            let result = read_value(self.handle, spinNodeIsWritable)?;
+            Ok(result == True)
+        }
+
+        pub fn access_mode(&self) -> Result<ControlAccessMode, CameraError> {
+            match (self.readable()?, self.writable()?) {
+                (true, true) => Ok(ControlAccessMode::ReadWrite),
+                (true, false) => Ok(ControlAccessMode::ReadOnly),
+                (false, false) => Ok(ControlAccessMode::None),
+                (false, true) => Ok(ControlAccessMode::WriteOnly)
+            }
         }
 
         pub fn display_name(&self) -> Result<String, CameraError> {
@@ -355,6 +404,69 @@ mod spin {
             let mut child = Node{ handle, name: "".to_string(), node_type: RefCell::new(None) };
             child.name = read_string(child.handle, spinNodeGetName)?;
             Ok(child)
+        }
+
+        pub fn current_enum_value(&self) -> Result<i64, CameraError> {
+            let current_entry = read_value(self.handle, spinEnumerationGetCurrentEntry)?;
+            let result = read_value(current_entry, spinEnumerationEntryGetIntValue)?;
+            checked_call!(spinEnumerationReleaseNode(self.handle, current_entry));
+            Ok(result)
+        }
+
+        /// Returns enumeration entries and current entry index.
+        pub fn enum_entries(&self) -> Result<(Vec<(i64, String)>, usize), CameraError> {
+            let mut entries = vec![];
+            let mut current_idx = 0;
+
+            let current_value = self.current_enum_value()?;
+
+            let num_entries = read_value(self.handle, spinEnumerationGetNumEntries)?;
+            for i in 0..num_entries {
+                let mut entry_node = std::mem::MaybeUninit::uninit();
+                checked_call!(spinEnumerationGetEntryByIndex(self.handle, i, entry_node.as_mut_ptr()));
+                let entry_node = unsafe { entry_node.assume_init() };
+
+                let entry_is_available = read_value(entry_node, spinNodeIsAvailable)?;
+                if entry_is_available != True { continue; }
+
+                let entry_enum_value = read_value(entry_node, spinEnumerationEntryGetIntValue)?;
+
+                let entry_symbolic_value = read_string(entry_node, spinEnumerationEntryGetSymbolic)?;
+
+                entries.push((entry_enum_value, entry_symbolic_value));
+                if entry_enum_value == current_value {
+                    current_idx = entries.len() - 1;
+                }
+
+                checked_call!(spinEnumerationReleaseNode(self.handle, entry_node));
+            }
+
+            Ok((entries, current_idx))
+        }
+
+        pub fn set_enum_entry(&mut self, enum_value: i64) -> Result<(), CameraError> {
+            checked_call!(spinEnumerationSetIntValue(self.handle, enum_value));
+            Ok(())
+        }
+
+        pub fn min_float(&self) -> Result<f64, CameraError> {
+            read_value(self.handle, spinFloatGetMin)
+        }
+
+        pub fn max_float(&self) -> Result<f64, CameraError> {
+            read_value(self.handle, spinFloatGetMax)
+        }
+
+        pub fn min_int(&self) -> Result<i64, CameraError> {
+            read_value(self.handle, spinIntegerGetMin)
+        }
+
+        pub fn max_int(&self) -> Result<i64, CameraError> {
+            read_value(self.handle, spinIntegerGetMax)
+        }
+
+        pub fn int_increment(&self) -> Result<i64, CameraError> {
+            read_value(self.handle, spinIntegerGetInc)
         }
     }
 }
@@ -420,13 +532,30 @@ impl Driver for SpinnakerDriver {
         camera_handle.init()?;
         camera_handle.begin_acquisition()?;
 
-        Ok(Box::new(SpinnakerCamera{ camera_handle: Arc::new(camera_handle), id }))
+        let genicam_node_map = camera_handle.genicam_node_map()?;
+        let temperature_node = genicam_node_map.node(genicam::DEVICE_TEMPERATURE).ok();
+
+        Ok(Box::new(SpinnakerCamera{
+            id,
+            name: genicam_node_map.node(genicam::DEVICE_MODEL_NAME)?.string_value()?,
+            camera_handle: Arc::new(camera_handle),
+            temperature_node,
+            controls: vec![]
+        }))
     }
+}
+
+struct ControlData {
+    node: spin::Node,
+    enum_entries: Option<Vec<(i64, String)>>
 }
 
 struct SpinnakerCamera {
     id: CameraId,
-    camera_handle: Arc<spin::Camera>
+    name: String,
+    camera_handle: Arc<spin::Camera>,
+    temperature_node: Option<spin::Node>,
+    controls: Vec<ControlData>
 }
 
 impl Camera for SpinnakerCamera {
@@ -435,11 +564,178 @@ impl Camera for SpinnakerCamera {
     }
 
     fn name(&self) -> &str {
-        unimplemented!()
+        &self.name
     }
 
     fn enumerate_controls(&mut self) -> Result<Vec<CameraControl>, CameraError> {
-        Ok(vec![])
+        let mut control_data = vec![];
+        let mut controls = vec![];
+
+        let genicam_node_map = self.camera_handle.genicam_node_map()?;
+
+        // for now just add basic controls explicitly ------------------------------
+
+        match genicam_node_map.node(genicam::EXPOSURE_TIME).ok() {
+            Some(node) => {
+                controls.push(CameraControl::Number(NumberControl{
+                    base: CameraControlBase{
+                        id: CameraControlId(control_data.len() as u64),
+                        label: "Exposure Time (µs)".to_string(),
+                        access_mode: node.access_mode()?,
+                        auto_state: None,
+                        on_off_state: None,
+                        requires_capture_pause: false
+                    },
+                    value: node.float_value()?,
+                    min: node.min_float()?,
+                    max: node.max_float()?,
+                    step: 1.0,
+                    num_decimals: 0
+                }));
+
+                control_data.push(ControlData{ node, enum_entries: None });
+            },
+            _ => ()
+        }
+
+        match genicam_node_map.node(genicam::EXPOSURE_AUTO).ok() {
+            Some(node) => {
+                let enum_entries = node.enum_entries()?;
+
+                controls.push(CameraControl::List(ListControl{
+                    base: CameraControlBase{
+                        id: CameraControlId(control_data.len() as u64),
+                        label: "Exposure Auto".to_string(),
+                        access_mode: node.access_mode()?,
+                        auto_state: None,
+                        on_off_state: None,
+                        requires_capture_pause: false
+                    },
+                    items: enum_entries.0.iter().map(|ee| ee.1.clone()).collect(),
+                    current_idx: enum_entries.1
+                }));
+
+                control_data.push(ControlData{ node, enum_entries: Some(enum_entries.0) });
+            },
+            _ => ()
+        }
+
+        //TODO: use `spinFloatGetUnit` in case control has device-specific units
+        match genicam_node_map.node(genicam::GAIN).ok() {
+            Some(node) => {
+                controls.push(CameraControl::Number(NumberControl{
+                    base: CameraControlBase{
+                        id: CameraControlId(control_data.len() as u64),
+                        label: "Gain".to_string(),
+                        access_mode: node.access_mode()?,
+                        auto_state: None,
+                        on_off_state: None,
+                        requires_capture_pause: false
+                    },
+                    value: node.float_value()?,
+                    min: node.min_float()?,
+                    max: node.max_float()?,
+                    step: 0.01, // how do we know? in Spinnaker we cannot just ask for "raw" value range of an IFloat node
+                    num_decimals: 2 // see above
+                }));
+
+                control_data.push(ControlData{ node, enum_entries: None });
+            },
+            _ => ()
+        }
+
+        match genicam_node_map.node(genicam::GAIN_AUTO).ok() {
+            Some(node) => {
+                let enum_entries = node.enum_entries()?;
+
+                controls.push(CameraControl::List(ListControl{
+                    base: CameraControlBase{
+                        id: CameraControlId(control_data.len() as u64),
+                        label: "Gain Auto".to_string(),
+                        access_mode: node.access_mode()?,
+                        auto_state: None,
+                        on_off_state: None,
+                        requires_capture_pause: false
+                    },
+                    items: enum_entries.0.iter().map(|ee| ee.1.clone()).collect(),
+                    current_idx: enum_entries.1
+                }));
+
+                control_data.push(ControlData{ node, enum_entries: Some(enum_entries.0) });
+            },
+            _ => ()
+        }
+
+        match genicam_node_map.node(genicam::ACQUISITION_FRAME_RATE).ok() {
+            Some(node) => {
+                controls.push(CameraControl::Number(NumberControl{
+                    base: CameraControlBase{
+                        id: CameraControlId(control_data.len() as u64),
+                        label: "Frame Rate".to_string(),
+                        access_mode: node.access_mode()?,
+                        auto_state: None,
+                        on_off_state: None,
+                        requires_capture_pause: false
+                    },
+                    value: node.float_value()?,
+                    min: node.min_float()?,
+                    max: node.max_float()?,
+                    step: 1.0,
+                    num_decimals: 0
+                }));
+
+                control_data.push(ControlData{ node, enum_entries: None });
+            },
+            _ => ()
+        }
+
+        match genicam_node_map.node(flir::ACQUISITION_FRAME_RATE_AUTO).ok() {
+            Some(node) => {
+                let enum_entries = node.enum_entries()?;
+
+                controls.push(CameraControl::List(ListControl{
+                    base: CameraControlBase{
+                        id: CameraControlId(control_data.len() as u64),
+                        label: "Frame Rate Auto".to_string(),
+                        access_mode: node.access_mode()?,
+                        auto_state: None,
+                        on_off_state: None,
+                        requires_capture_pause: false
+                    },
+                    items: enum_entries.0.iter().map(|ee| ee.1.clone()).collect(),
+                    current_idx: enum_entries.1
+                }));
+
+                control_data.push(ControlData{ node, enum_entries: Some(enum_entries.0) });
+            },
+            _ => ()
+        }
+
+        match genicam_node_map.node(flir::ACQUISITION_FRAME_RATE_ENABLED).ok() {
+            Some(node) => {
+                controls.push(CameraControl::Boolean(BooleanControl{
+                    base: CameraControlBase{
+                        id: CameraControlId(control_data.len() as u64),
+                        label: "Frame Rate Enabled".to_string(),
+                        access_mode: node.access_mode()?,
+                        auto_state: None,
+                        on_off_state: None,
+                        requires_capture_pause: false
+                    },
+                    state: node.bool_value()?
+                }));
+
+                control_data.push(ControlData{ node, enum_entries: None });
+            },
+            _ => ()
+        }
+
+        //TODO: add automatic reading of unknown controls, including those from the "device" and "stream" maps,
+        // make it configurable via config file and/or via GUI
+
+        self.controls = control_data;
+
+        Ok(controls)
     }
 
     fn create_capturer(&self) -> Result<Box<dyn FrameCapturer + Send>, CameraError> {
@@ -452,11 +748,16 @@ impl Camera for SpinnakerCamera {
     }
 
     fn set_number_control(&self, id: CameraControlId, value: f64) -> Result<Vec<Notification>, CameraError> {
-        unimplemented!()
+        self.controls[id.0 as usize].node.set_float_value(value)?;
+        Ok(vec![])
     }
 
     fn set_list_control(&mut self, id: CameraControlId, option_idx: usize) -> Result<Vec<Notification>, CameraError> {
-        unimplemented!()
+        let control_data = &mut self.controls[id.0 as usize];
+
+        control_data.node.set_enum_entry(control_data.enum_entries.as_ref().unwrap()[option_idx].0)?;
+
+        Ok(vec![])
     }
 
     fn set_auto(&self, id: CameraControlId, state: bool) -> Result<Vec<Notification>, CameraError> {
@@ -468,15 +769,27 @@ impl Camera for SpinnakerCamera {
     }
 
     fn get_number_control(&self, id: CameraControlId) -> Result<f64, CameraError> {
-        unimplemented!()
+        self.controls[id.0 as usize].node.float_value()
     }
 
     fn get_list_control(&self, id: CameraControlId) -> Result<usize, CameraError> {
-        unimplemented!()
+        //TODO: change to the new refresh approach
+        let control_data = &self.controls[id.0 as usize];
+        let current = control_data.node.current_enum_value()?;
+        for (idx, entry) in control_data.enum_entries.as_ref().unwrap().iter().enumerate() {
+            if entry.0 == current {
+                return Ok(idx);
+            }
+        }
+
+        panic!("Unexpected current enumeration entry.");
     }
 
     fn temperature(&self) -> Option<f64> {
-        None
+        match &self.temperature_node {
+            None => None,
+            Some(node) => node.float_value().ok()
+        }
     }
 
     fn set_roi(&mut self, x0: u32, y0: u32, width: u32, height: u32) -> Result<(), CameraError> {
@@ -485,6 +798,15 @@ impl Camera for SpinnakerCamera {
 
     fn unset_roi(&mut self) -> Result<(), CameraError> {
         unimplemented!()
+    }
+
+    fn set_boolean_control(&mut self, id: CameraControlId, state: bool) -> Result<Vec<Notification>, CameraError> {
+        self.controls[id.0 as usize].node.set_bool_value(state)?;
+        Ok(vec![])
+    }
+
+    fn get_boolean_control(&self, id: CameraControlId) -> Result<bool, CameraError> {
+        self.controls[id.0 as usize].node.bool_value()
     }
 }
 
